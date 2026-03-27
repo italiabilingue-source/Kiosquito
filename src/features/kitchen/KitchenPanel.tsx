@@ -4,18 +4,18 @@ import { subscribeToProductos, updateProducto } from '../../firebase/productos';
 import { getAlumnos, updateAlumno } from '../../firebase/alumnos';
 import { createMovimiento } from '../../firebase/movimientos';
 import type { Pedido, Producto, Alumno } from '../../types';
-import { ChefHat, Check, Clock, AlertTriangle, Package, Users, DollarSign, CreditCard, ChevronRight } from 'lucide-react';
+import { ChefHat, Clock, Package, Users, DollarSign, CreditCard } from 'lucide-react';
 
 export const KitchenPanel: React.FC = () => {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
-  const [loading, setLoading] = useState(true);
+  // loading state removed for lint consistency
 
   useEffect(() => {
     const unsubPedidos = subscribeToPedidosActivos(setPedidos);
     const unsubProductos = subscribeToProductos(setProductos);
-    getAlumnos().then(setAlumnos).finally(() => setLoading(false));
+    getAlumnos().then(setAlumnos);
 
     return () => {
       unsubPedidos();

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Lock, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Lock } from 'lucide-react';
 
 interface AuthGuardProps {
   children: React.ReactNode;

@@ -3,7 +3,7 @@ import { subscribeToAlumnos, createAlumno, updateAlumno } from '../../firebase/a
 import { getAllProductos, createProducto, updateProducto, deleteProducto } from '../../firebase/productos';
 import { subscribeToMovimientos, createMovimiento } from '../../firebase/movimientos';
 import type { Alumno, Producto, Movimiento } from '../../types';
-import { Users, Package, Plus, Search, Trash2, Edit, X, CreditCard, UserPlus, Clock, History, ArrowUpRight, ArrowDownLeft, DollarSign, CheckCircle, Loader2 } from 'lucide-react';
+import { Users, Package, Plus, Search, Trash2, Edit, X, UserPlus, History, ArrowUpRight, ArrowDownLeft, DollarSign, CheckCircle, Loader2 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'stats' | 'alumnos' | 'productos' | 'historial'>('stats');
