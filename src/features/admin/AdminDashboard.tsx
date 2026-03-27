@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { subscribeToAlumnos, createAlumno, updateAlumno } from '../../firebase/alumnos';
-import { getAllProductos, createProducto, updateProducto, deleteProducto, subscribeToProductos } from '../../firebase/productos';
+import { createProducto, updateProducto, deleteProducto, subscribeToProductos } from '../../firebase/productos';
 import { subscribeToMovimientos, createMovimiento } from '../../firebase/movimientos';
 import { subscribeToPedidosActivos, updatePedidoEstado } from '../../firebase/pedidos';
 import type { Alumno, Producto, Movimiento, Pedido } from '../../types';
-import { Users, Package, Plus, Search, Trash2, Edit, X, UserPlus, History, ArrowUpRight, ArrowDownLeft, DollarSign, CheckCircle, Loader2, ChefHat, Clock, CreditCard } from 'lucide-react';
+import { Users, Package, Search, Trash2, Edit, X, UserPlus, History, ArrowUpRight, ArrowDownLeft, DollarSign, CheckCircle, Loader2, ChefHat, Clock } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'stats' | 'pedidos' | 'alumnos' | 'productos' | 'historial'>('stats');
