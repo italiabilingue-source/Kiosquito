@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { subscribeToAlumnos, createAlumno, updateAlumno } from '../../firebase/alumnos';
-import { getAllProductos, createProducto, updateProducto, deleteProducto } from '../../firebase/productos';
+import { getAllProductos, createProducto, updateProducto, deleteProducto, subscribeToProductos } from '../../firebase/productos';
 import { subscribeToMovimientos, createMovimiento } from '../../firebase/movimientos';
-import type { Alumno, Producto, Movimiento } from '../../types';
-import { Users, Package, Plus, Search, Trash2, Edit, X, UserPlus, History, ArrowUpRight, ArrowDownLeft, DollarSign, CheckCircle, Loader2 } from 'lucide-react';
+import { subscribeToPedidosActivos, updatePedidoEstado } from '../../firebase/pedidos';
+import type { Alumno, Producto, Movimiento, Pedido } from '../../types';
+import { Users, Package, Plus, Search, Trash2, Edit, X, UserPlus, History, ArrowUpRight, ArrowDownLeft, DollarSign, CheckCircle, Loader2, ChefHat, Clock, CreditCard } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'stats' | 'alumnos' | 'productos' | 'historial'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'pedidos' | 'alumnos' | 'productos' | 'historial'>('stats');
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
+  const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -23,16 +25,49 @@ export const AdminDashboard: React.FC = () => {
     // Suscripciones en tiempo real
     const unsubAlumnos = subscribeToAlumnos(setAlumnos);
     const unsubMovimientos = subscribeToMovimientos(setMovimientos);
+    const unsubPedidos = subscribeToPedidosActivos(setPedidos);
+    const unsubProductos = subscribeToProductos(setProductos); // Ahora también tiempo real
     
-    // Carga inicial de productos (estáticos para evitar exceso de lecturas)
-    getAllProductos().then(setProductos).finally(() => setLoading(false));
+    setLoading(false);
 
     return () => {
       unsubAlumnos();
       unsubMovimientos();
+      unsubPedidos();
+      unsubProductos();
     };
   }, []);
 
+  // --- Lógica de Pedidos (Cocina Integrada) ---
+  const handleCobrarPedido = async (pedido: Pedido, tipo: 'pagado' | 'fiado') => {
+    const confirmMsg = tipo === 'pagado' 
+      ? `¿Confirmar pago de $${pedido.total}?` 
+      : `¿Registrar $${pedido.total} como deuda (fiado)?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const alumno = alumnos.find(a => a.id === pedido.alumnoId);
+      if (!alumno) throw new Error("Alumno no encontrado");
+
+      await createMovimiento({
+        alumnoId: pedido.alumnoId,
+        tipo: 'deuda',
+        monto: pedido.total,
+        descripcion: `Pedido: ${pedido.items.map(i => i.productoNombre).join(', ')}`,
+        createdAt: Date.now()
+      });
+
+      if (tipo === 'fiado') {
+        const nuevoBalance = (alumno.balance || 0) - pedido.total;
+        await updateAlumno(alumno.id, { balance: nuevoBalance });
+      }
+
+      await updatePedidoEstado(pedido.id, 'entregado');
+    } catch (e) { alert("Error al procesar"); }
+  };
+
+  // --- Lógica de Gestión ---
   const handleSaveAlumno = async () => {
     if (!editingAlumno) return;
     try {
@@ -72,14 +107,12 @@ export const AdminDashboard: React.FC = () => {
         });
       }
       setEditingProducto(null);
-      getAllProductos().then(setProductos);
     } catch (e) { alert("Error"); }
   };
 
   const handleDeleteProducto = async (id: string) => {
     if (window.confirm("¿Eliminar producto?")) {
       await deleteProducto(id);
-      getAllProductos().then(setProductos);
     }
   };
 
@@ -111,43 +144,95 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 border-x border-slate-200 lg:max-w-7xl lg:mx-auto">
-      <header className="bg-slate-900 text-white p-4 md:p-6 flex flex-col md:flex-row md:items-center justify-between shadow-xl shrink-0">
+      <header className="bg-slate-900 text-white p-4 md:p-6 flex flex-col md:flex-row md:items-center justify-between shadow-xl shrink-0 z-30">
         <div className="flex items-center mb-4 md:mb-0">
-          <div className="bg-cafeteria-500 p-2 rounded-xl mr-3"><Users className="text-slate-900" /></div>
+          <div className="bg-cafeteria-500 p-2 rounded-xl mr-3 shadow-lg shadow-cafeteria-500/20"><ChefHat className="text-slate-900" /></div>
           <h1 className="text-xl md:text-2xl font-black tracking-tighter uppercase italic leading-none">KIOSCO ADMIN</h1>
         </div>
-        <nav className="flex flex-wrap gap-2 bg-slate-800 p-1 rounded-2xl">
+        <nav className="flex flex-wrap gap-2 bg-slate-800 p-1 rounded-2xl overflow-x-auto scrollbar-hide">
           {[
             {id: 'stats', label: 'Dashboard', icon: Users},
+            {id: 'pedidos', label: 'Cocina', icon: ChefHat},
             {id: 'alumnos', label: 'Alumnos', icon: UserPlus},
             {id: 'productos', label: 'Cartilla', icon: Package},
             {id: 'historial', label: 'Auditoría', icon: History}
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} 
-              className={`px-3 py-2 rounded-xl text-xs md:text-sm font-black flex items-center transition-all ${activeTab === tab.id ? 'bg-cafeteria-500 text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'}`}>
+              className={`px-3 py-2 rounded-xl text-xs md:text-sm font-black flex items-center transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-cafeteria-500 text-slate-900 shadow-md scale-105' : 'text-slate-400 hover:text-white'}`}>
               <tab.icon className="w-4 h-4 mr-2" /> {tab.label}
+              {tab.id === 'pedidos' && pedidos.length > 0 && (
+                <span className="ml-2 bg-slate-900 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center border border-cafeteria-400">{pedidos.length}</span>
+              )}
             </button>
           ))}
         </nav>
       </header>
 
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto w-full">
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto w-full pb-20">
         {loading ? <div className="flex justify-center p-20"><Loader2 className="animate-spin text-cafeteria-500" /></div> : (
           <>
             {activeTab === 'stats' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in zoom-in-95">
                  <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200">
-                    <span className="text-slate-400 font-bold uppercase text-[10px] block mb-2">Deuda en Calle</span>
+                    <span className="text-slate-400 font-bold uppercase text-[10px] block mb-2 tracking-widest">Deuda en Calle</span>
                     <span className="text-3xl font-black text-red-500 tracking-tighter">${alumnos.reduce((s, a) => s + (a.balance < 0 ? Math.abs(a.balance) : 0), 0).toLocaleString()}</span>
                  </div>
                  <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200">
-                    <span className="text-slate-400 font-bold uppercase text-[10px] block mb-2">Créditos de Alumnos</span>
+                    <span className="text-slate-400 font-bold uppercase text-[10px] block mb-2 tracking-widest">Créditos de Alumnos</span>
                     <span className="text-3xl font-black text-emerald-500 tracking-tighter">${alumnos.reduce((s, a) => s + (a.balance > 0 ? a.balance : 0), 0).toLocaleString()}</span>
                  </div>
                  <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200">
-                    <span className="text-slate-400 font-bold uppercase text-[10px] block mb-2">Total Alumnos</span>
+                    <span className="text-slate-400 font-bold uppercase text-[10px] block mb-2 tracking-widest">Total Alumnos</span>
                     <span className="text-3xl font-black text-slate-800 tracking-tighter">{alumnos.length}</span>
                  </div>
+              </div>
+            )}
+
+            {/* TAB: Cocina Integrada */}
+            {activeTab === 'pedidos' && (
+              <div className="space-y-6 animate-in slide-in-from-bottom-6">
+                <div className="flex items-center justify-between mb-2">
+                   <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-800 flex items-center">
+                     Pedidos por Entregar <Clock className="ml-2 w-5 h-5 text-orange-500" />
+                   </h2>
+                </div>
+                {pedidos.length === 0 ? (
+                  <div className="bg-white rounded-[2rem] p-12 text-center border-2 border-dashed border-slate-200">
+                    <ChefHat className="w-16 h-16 mx-auto mb-4 text-slate-200" />
+                    <p className="font-black text-slate-400 uppercase tracking-widest">Cocina Vacía</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {pedidos.map(p => (
+                      <div key={p.id} className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-slate-100 flex flex-col hover:shadow-xl transition-all border-l-8 border-l-orange-500 group">
+                        <div className="mb-4 flex justify-between items-start">
+                           <div className="bg-slate-900 text-white px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-tighter italic">
+                             {getAlumnoNombre(p.alumnoId)}
+                           </div>
+                           <span className="text-xs font-black text-slate-300">#{p.id.slice(-4)}</span>
+                        </div>
+                        <div className="flex-1 space-y-2 mb-6">
+                           {p.items?.map((item, idx) => (
+                             <div key={idx} className="flex justify-between items-center text-sm font-bold bg-slate-50 p-2 rounded-lg">
+                                <span className="text-slate-700 leading-none truncate pr-2">{item.productoNombre}</span>
+                                <span className="text-cafeteria-600 bg-white px-2 py-0.5 rounded-md shadow-sm border border-slate-100">x{item.cantidad}</span>
+                             </div>
+                           ))}
+                        </div>
+                        <div className="pt-4 border-t border-slate-50 flex flex-col space-y-3">
+                           <div className="flex justify-between items-center mb-1">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total</span>
+                              <span className="text-2xl font-black text-slate-800 tracking-tighter italic">${p.total}</span>
+                           </div>
+                           <div className="grid grid-cols-2 gap-2">
+                              <button onClick={() => handleCobrarPedido(p, 'pagado')} className="bg-emerald-500 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-tighter shadow-lg shadow-emerald-500/10 active:scale-95 transition-all">PAGÓ</button>
+                              <button onClick={() => handleCobrarPedido(p, 'fiado')} className="bg-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-tighter active:scale-95 transition-all outline outline-1 outline-cafeteria-500/30">FIADO</button>
+                           </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -156,14 +241,14 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex flex-col md:flex-row gap-4">
                   <div className="relative flex-1">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                    <input type="text" placeholder="Buscar por Nombre o DNI..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full bg-white border border-slate-200 rounded-2xl py-3 pl-12 pr-4 font-bold outline-none focus:border-cafeteria-500" />
+                    <input type="text" placeholder="Buscar por Nombre o DNI..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full bg-white border border-slate-200 rounded-2xl py-3 pl-12 pr-4 font-bold outline-none focus:border-cafeteria-500 shadow-sm" />
                   </div>
-                  <button onClick={() => setEditingAlumno({})} className="bg-cafeteria-600 text-white font-black px-6 py-3 rounded-2xl flex items-center justify-center transition-all active:scale-95 shadow-lg shadow-cafeteria-600/20 text-xs md:text-sm"><Plus className="mr-2 w-4 h-4" /> NUEVO ALUMNO</button>
+                  <button onClick={() => setEditingAlumno({})} className="bg-cafeteria-600 text-white font-black px-6 py-3 rounded-2xl flex items-center justify-center transition-all active:scale-95 shadow-lg shadow-cafeteria-600/20 text-xs md:text-sm italic tracking-tighter">NUEVO ALUMNO</button>
                 </div>
-                <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden">
-                  <table className="w-full text-left">
+                <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto">
+                  <table className="w-full text-left min-w-[600px]">
                     <thead className="bg-slate-50 border-b border-slate-100">
-                      <tr><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Alumno / Curso</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-right">SaldoActual</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-center">Acciones</th></tr>
+                      <tr><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Alumno / Curso</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-right">Saldo Actual</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-center">Acciones</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredAlumnos.map(a => (
@@ -173,7 +258,7 @@ export const AdminDashboard: React.FC = () => {
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{a.curso} • DNI {a.dni}</div>
                           </td>
                           <td className="px-6 py-4 text-right">
-                            <span className={`text-xl font-black ${a.balance < 0 ? 'text-red-500' : 'text-emerald-500'} tracking-tighter`}>${a.balance}</span>
+                            <span className={`text-xl font-black ${a.balance < 0 ? 'text-red-500' : 'text-emerald-500'} tracking-tighter italic`}>${a.balance}</span>
                           </td>
                           <td className="px-6 py-4 text-center space-x-1">
                              <button onClick={() => { setSettlingAlumno(a); setSettleAmount(Math.abs(a.balance)); }} 
@@ -193,22 +278,22 @@ export const AdminDashboard: React.FC = () => {
 
             {activeTab === 'productos' && (
               <div className="space-y-6 animate-in slide-in-from-left-4">
-                <div className="flex justify-end"><button onClick={() => setEditingProducto({})} className="bg-slate-800 text-white font-black px-6 py-3 rounded-2xl flex items-center transition-all active:scale-95 text-xs md:text-sm"><Plus className="mr-2 w-4 h-4" /> NUEVO EN LA CARTA</button></div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="flex justify-end"><button onClick={() => setEditingProducto({})} className="bg-slate-800 text-white font-black px-6 py-3 rounded-2xl flex items-center transition-all active:scale-95 text-xs md:text-sm italic tracking-tighter">NUEVO EN LA CARTA</button></div>
+                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {productos.map(p => (
                     <div key={p.id} className="bg-white p-5 rounded-[2.5rem] border border-slate-200 shadow-sm group hover:shadow-md transition-all">
                        <div className="flex justify-between items-center mb-3">
                           <span className="bg-slate-50 text-[9px] font-black px-3 py-1 rounded-full uppercase text-slate-400 tracking-widest">{p.categoria}</span>
-                          <div className="flex"><button onClick={() => setEditingProducto(p)} className="p-1 text-slate-300 hover:text-blue-500"><Edit className="w-4 h-4" /></button><button onClick={() => handleDeleteProducto(p.id)} className="p-1 text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button></div>
+                          <div className="flex opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => setEditingProducto(p)} className="p-1 text-slate-300 hover:text-blue-500"><Edit className="w-4 h-4" /></button><button onClick={() => handleDeleteProducto(p.id)} className="p-1 text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button></div>
                        </div>
-                       <h3 className="font-black text-sm text-slate-800 italic uppercase leading-tight mb-4 truncate">{p.nombre}</h3>
+                       <h3 className="font-black text-xs md:text-sm text-slate-800 italic uppercase leading-tight mb-4 truncate">{p.nombre}</h3>
                        <div className="flex items-center justify-between mt-auto pt-4 border-t border-slate-50">
-                          <span className="text-xl font-black text-cafeteria-600 tracking-tighter">${p.precio}</span>
+                          <span className="text-lg md:text-xl font-black text-cafeteria-600 tracking-tighter">${p.precio}</span>
                           <button 
-                            onClick={() => updateProducto(p.id, { disponible: !p.disponible }).then(() => getAllProductos().then(setProductos))}
+                            onClick={() => updateProducto(p.id, { disponible: !p.disponible })}
                             className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase transition-all ${p.disponible ? 'text-emerald-500 bg-emerald-50' : 'text-red-500 bg-red-50'}`}
                           >
-                            {p.disponible ? 'STOCK' : 'AGOTADO'}
+                            {p.disponible ? 'STOCK' : 'X'}
                           </button>
                        </div>
                     </div>
@@ -220,27 +305,27 @@ export const AdminDashboard: React.FC = () => {
             {activeTab === 'historial' && (
               <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden animate-in slide-in-from-bottom-4">
                 <div className="p-6 bg-slate-50 border-b flex items-center justify-between">
-                   <h3 className="font-black italic uppercase tracking-widest text-slate-400 text-xs">Auditoría de Movimientos</h3>
+                   <h3 className="font-black italic uppercase tracking-widest text-slate-400 text-[10px]">Auditoría de Movimientos</h3>
                 </div>
-                <table className="w-full text-left">
+                <table className="w-full text-left min-w-[500px]">
                    <thead className="bg-slate-50 border-b">
-                     <tr><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Fecha</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Alumno / Cliente</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Concepto</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-right">Variación</th></tr>
+                     <tr><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Fecha</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Alumno</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Concepto</th><th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-right">Variación</th></tr>
                    </thead>
-                   <tbody className="divide-y divide-slate-100">
+                   <tbody className="divide-y divide-slate-100 text-xs">
                      {movimientos.map(m => (
                        <tr key={m.id} className="hover:bg-slate-50 transition-colors">
-                         <td className="px-6 py-4 text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                         <td className="px-6 py-4 text-[10px] font-bold text-slate-400 whitespace-nowrap">
                            {new Date(m.createdAt).toLocaleString('es-AR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}
                          </td>
-                         <td className="px-6 py-4 font-black uppercase text-xs tracking-tighter italic text-slate-700">{getAlumnoNombre(m.alumnoId)}</td>
+                         <td className="px-6 py-4 font-black uppercase tracking-tighter italic text-slate-700">{getAlumnoNombre(m.alumnoId)}</td>
                          <td className="px-6 py-4">
                            <div className="flex items-center">
                              {m.tipo === 'deuda' ? <ArrowDownLeft className="text-red-500 w-3 h-3 mr-2 shrink-0" /> : <ArrowUpRight className="text-emerald-500 w-3 h-3 mr-2 shrink-0" />}
-                             <span className="text-[11px] font-bold text-slate-600 leading-tight">{m.descripcion}</span>
+                             <span className="text-[10px] font-bold text-slate-500 leading-tight uppercase">{m.descripcion}</span>
                            </div>
                          </td>
                          <td className="px-6 py-4 text-right">
-                           <span className={`font-black text-base md:text-lg tracking-tighter ${m.tipo === 'deuda' ? 'text-red-500' : 'text-emerald-500'}`}>
+                           <span className={`font-black text-base tracking-tighter italic ${m.tipo === 'deuda' ? 'text-red-500' : 'text-emerald-500'}`}>
                              {m.tipo === 'deuda' ? '-' : '+'}${m.monto}
                            </span>
                          </td>
@@ -256,32 +341,29 @@ export const AdminDashboard: React.FC = () => {
 
       {/* MODAL: Liquidar Deuda / Cobrar */}
       {settlingAlumno && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-3xl z-[100] flex items-center justify-center p-4 animate-in fade-in">
-           <div className="bg-white rounded-[3rem] p-8 md:p-12 w-full max-w-md shadow-2xl relative border border-slate-100">
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-3xl z-[100] flex items-center justify-center p-4">
+           <div className="bg-white rounded-[3rem] p-8 md:p-12 w-full max-w-md shadow-2xl relative border border-slate-100 overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-emerald-500"></div>
               <button onClick={() => setSettlingAlumno(null)} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-all"><X className="w-8 h-8" /></button>
-              <div className="w-16 h-16 bg-emerald-100 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-emerald-200"><DollarSign className="w-8 h-8 text-emerald-600" /></div>
-              <h2 className="text-3xl font-black text-slate-900 mb-2 leading-none uppercase italic tracking-tighter">Cobrar</h2>
+              <div className="w-16 h-16 bg-emerald-100 rounded-3xl flex items-center justify-center mb-6 border border-emerald-200 shadow-inner"><DollarSign className="w-8 h-8 text-emerald-600" /></div>
+              <h2 className="text-3xl font-black text-slate-900 mb-2 uppercase italic tracking-tighter">Carga de Saldo</h2>
               <p className="text-slate-400 font-bold mb-8 uppercase tracking-widest text-[10px]">Alumno: <span className="text-slate-800">{getAlumnoNombre(settlingAlumno.id)}</span></p>
               <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 mb-8 text-center relative">
-                 <span className="absolute top-4 left-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Saldo a ingresar</span>
-                 <div className="text-5xl font-black text-slate-900 tracking-tighter flex items-center justify-center pt-4">
-                    <span className="text-emerald-500 mr-2">$</span>
+                 <span className="absolute top-4 left-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Ingresar Monto</span>
+                 <div className="text-5xl font-black text-slate-900 tracking-tighter flex items-center justify-center pt-4 italic">
+                    <span className="text-emerald-500 mr-2 not-italic">$</span>
                     <input type="number" value={settleAmount} onChange={e => setSettleAmount(Number(e.target.value))} className="bg-transparent border-none outline-none w-32 font-black" autoFocus />
                  </div>
-                 <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center opacity-60">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">Deuda Actual:</span>
-                    <span className="text-xl font-black text-red-500">${settlingAlumno.balance}</span>
-                 </div>
               </div>
-              <button onClick={handleSettleDebt} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white h-20 rounded-[2.5rem] font-black text-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 flex items-center justify-center uppercase tracking-tighter group italic">Confirmar Pago <CheckCircle className="ml-3 w-8 h-8 group-hover:scale-110 transition-transform" /></button>
+              <button onClick={handleSettleDebt} className="w-full bg-emerald-500 text-white h-20 rounded-[2.5rem] font-black text-2xl shadow-xl shadow-emerald-500/20 active:scale-95 flex items-center justify-center uppercase tracking-tighter italic group transition-all hover:bg-emerald-600">CONFIRMAR <CheckCircle className="ml-3 w-8 h-8" /></button>
            </div>
         </div>
       )}
 
-      {/* Modal Alumno (Registros) */}
+      {/* Modal Alumno */}
       {editingAlumno && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-6">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative border">
+          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative border animate-in zoom-in-95 duration-200">
              <button onClick={() => setEditingAlumno(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-800"><X /></button>
              <h2 className="text-2xl font-black mb-6 uppercase italic tracking-tighter">Ficha Alumno</h2>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -289,37 +371,34 @@ export const AdminDashboard: React.FC = () => {
                 <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Apellido</label><input type="text" value={editingAlumno.apellido || ''} onChange={e => setEditingAlumno({...editingAlumno, apellido: e.target.value})} className="w-full bg-slate-50 p-4 rounded-xl font-bold border border-slate-100" /></div>
                 <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">DNI</label><input type="text" value={editingAlumno.dni || ''} onChange={e => setEditingAlumno({...editingAlumno, dni: e.target.value})} className="w-full bg-slate-50 p-4 rounded-xl font-bold border border-slate-100" /></div>
                 <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Curso</label><input type="text" value={editingAlumno.curso || ''} onChange={e => setEditingAlumno({...editingAlumno, curso: e.target.value})} className="w-full bg-slate-50 p-4 rounded-xl font-bold border border-slate-100" /></div>
-                <div className="col-span-1 md:col-span-2 space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">RFID</label><input type="text" value={editingAlumno.rfid || ''} onChange={e => setEditingAlumno({...editingAlumno, rfid: e.target.value})} className="w-full bg-slate-50 p-4 rounded-xl font-bold border border-slate-100 text-cafeteria-600" /></div>
+                <div className="col-span-1 md:col-span-2 space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">RFID</label><input type="text" value={editingAlumno.rfid || ''} onChange={e => setEditingAlumno({...editingAlumno, rfid: e.target.value})} className="w-full bg-slate-50 p-4 rounded-xl font-bold border border-slate-100 text-cafeteria-600 uppercase" /></div>
              </div>
-             <button onClick={handleSaveAlumno} className="w-full bg-slate-900 text-white py-5 rounded-[2rem] font-black uppercase italic shadow-lg mt-8 active:scale-95 transition-all">Guardar</button>
+             <button onClick={handleSaveAlumno} className="w-full bg-slate-900 text-white py-5 rounded-[2rem] font-black uppercase italic shadow-lg mt-8 active:scale-95 transition-all outline outline-1 outline-cafeteria-400">Guardar Ficha</button>
           </div>
         </div>
       )}
 
-      {/* Modal Producto (Carta) */}
+      {/* Modal Producto */}
       {editingProducto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-6">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative border">
+          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative border animate-in zoom-in-95 duration-200">
              <button onClick={() => setEditingProducto(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-800 transition-all"><X /></button>
-             <h2 className="text-2xl font-black mb-6 uppercase italic tracking-tighter">Producto</h2>
+             <h2 className="text-2xl font-black mb-6 uppercase italic tracking-tighter">Producto en Carta</h2>
              <div className="space-y-4">
-                <input type="text" value={editingProducto.nombre || ''} onChange={e => setEditingProducto({...editingProducto, nombre: e.target.value})} placeholder="Nombre" className="w-full bg-slate-50 p-4 rounded-xl font-bold border" />
-                <input type="number" value={editingProducto.precio || ''} onChange={e => setEditingProducto({...editingProducto, precio: Number(e.target.value)})} placeholder="Precio" className="w-full bg-slate-100 p-4 rounded-xl font-black border border-slate-100 text-cafeteria-600 text-2xl" />
-                <input type="text" value={editingProducto.categoria || ''} onChange={e => setEditingProducto({...editingProducto, categoria: e.target.value})} placeholder="Categoría" className="w-full bg-slate-50 p-4 rounded-xl font-bold border" />
+                <input type="text" value={editingProducto.nombre || ''} onChange={e => setEditingProducto({...editingProducto, nombre: e.target.value})} placeholder="Nombre del Producto" className="w-full bg-slate-100 p-4 rounded-xl font-black border border-transparent focus:border-cafeteria-500 outline-none uppercase italic" />
+                <div className="relative">
+                   <div className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black text-cafeteria-400 bg-white w-8 h-8 rounded flex items-center justify-center shadow-sm">$</div>
+                   <input type="number" value={editingProducto.precio || ''} onChange={e => setEditingProducto({...editingProducto, precio: Number(e.target.value)})} placeholder="Precio" className="w-full bg-slate-900 p-4 pl-14 rounded-xl font-black text-cafeteria-500 text-3xl italic tracking-tighter outline-none" />
+                </div>
+                <input type="text" value={editingProducto.categoria || ''} onChange={e => setEditingProducto({...editingProducto, categoria: e.target.value})} placeholder="Categoría (Ej: Snacks)" className="w-full bg-slate-50 p-4 rounded-xl font-bold border border-slate-100" />
                 <div className="pt-4 border-t border-slate-100">
                    <label className="flex items-center font-black text-[10px] text-slate-700 uppercase tracking-widest">
-                      <input type="checkbox" checked={editingProducto.soloHorario || false} onChange={e => setEditingProducto({...editingProducto, soloHorario: e.target.checked})} className="mr-3 w-5 h-5 rounded-lg accent-cafeteria-600" />
-                      Limitar Horario
+                      <input type="checkbox" checked={editingProducto.soloHorario || false} onChange={e => setEditingProducto({...editingProducto, soloHorario: e.target.checked})} className="mr-3 w-5 h-5 rounded-lg accent-cafeteria-600 transition-all" />
+                      Limitar por Horario
                    </label>
-                   {editingProducto.soloHorario && (
-                     <div className="grid grid-cols-2 gap-4 mt-4">
-                        <input type="time" value={editingProducto.horaInicio || "07:00"} onChange={e => setEditingProducto({...editingProducto, horaInicio: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl font-bold" />
-                        <input type="time" value={editingProducto.horaFin || "10:00"} onChange={e => setEditingProducto({...editingProducto, horaFin: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl font-bold" />
-                     </div>
-                   )}
                 </div>
              </div>
-             <button onClick={handleSaveProducto} className="w-full bg-cafeteria-600 text-white py-5 rounded-[2rem] font-black uppercase italic shadow-lg mt-8 active:scale-95 transition-all">Guardar</button>
+             <button onClick={handleSaveProducto} className="w-full bg-cafeteria-600 text-white py-5 rounded-[2rem] font-black uppercase italic shadow-lg mt-8 active:scale-95 transition-all">Sincronizar Producto</button>
           </div>
         </div>
       )}

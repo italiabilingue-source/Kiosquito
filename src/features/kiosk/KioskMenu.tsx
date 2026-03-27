@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { subscribeToProductos } from '../../firebase/productos';
 import { createPedido } from '../../firebase/pedidos';
@@ -20,8 +20,16 @@ export const KioskMenu: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activeCategory, setActiveCategory] = useState<string>('Todos');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(0);
+  const asideRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
+    const updateSize = () => {
+      if (asideRef.current) setSidebarWidth(asideRef.current.offsetWidth);
+    };
+    window.addEventListener('resize', updateSize);
+    updateSize();
+    
     const unsubscribe = subscribeToProductos((allProd) => {
       const now = new Date();
       setCurrentTime(now);
@@ -38,7 +46,11 @@ export const KioskMenu: React.FC = () => {
       setLoading(false);
     });
     const timer = setInterval(() => setCurrentTime(new Date()), 30000);
-    return () => { unsubscribe(); clearInterval(timer); };
+    return () => { 
+      unsubscribe(); 
+      clearInterval(timer);
+      window.removeEventListener('resize', updateSize);
+    };
   }, []);
 
   useRfidReader(async (rfid) => {
@@ -84,8 +96,11 @@ export const KioskMenu: React.FC = () => {
   return (
     <div className="flex flex-col md:flex-row bg-white min-h-screen h-screen overflow-hidden font-sans select-none text-slate-900 border-x border-slate-200 lg:max-w-7xl lg:mx-auto">
       
-      {/* Sidebar de Categorías - Adaptativo */}
-      <aside className={`fixed inset-0 z-50 md:relative md:flex md:w-24 bg-slate-50 border-r border-slate-100 flex-col items-center py-4 space-y-4 shrink-0 transition-transform md:translate-x-0 ${showMobileMenu ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+      {/* Sidebar de Categorías */}
+      <aside 
+        ref={asideRef}
+        className={`fixed inset-0 z-50 md:relative md:flex md:w-24 bg-slate-50 border-r border-slate-100 flex-col items-center py-4 space-y-4 shrink-0 transition-transform md:translate-x-0 ${showMobileMenu ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+      >
         <div className="flex md:hidden absolute top-4 right-4"><button onClick={() => setShowMobileMenu(false)}><X className="w-8 h-8 text-slate-400" /></button></div>
         <div className="w-12 h-12 bg-cafeteria-600 rounded-xl flex items-center justify-center shadow-lg mb-4">
            <Utensils className="w-6 h-6 text-white" />
@@ -149,22 +164,25 @@ export const KioskMenu: React.FC = () => {
           )}
         </div>
 
-        {/* Barra de Carrito Flotante (McDonald's Style) */}
-        <div className={`fixed bottom-0 left-0 right-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.15)] border-t border-slate-100 px-4 py-3 md:py-4 transition-all duration-500 z-40 ${cart.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
+        {/* Barra de Carrito Flotante (Sincronizada con sidebar) */}
+        <div 
+          style={{ left: window.innerWidth >= 768 ? `${sidebarWidth}px` : '0px' }}
+          className={`fixed bottom-0 right-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.15)] border-t border-slate-100 px-4 py-3 md:py-4 transition-all duration-500 z-40 lg:max-w-[calc(80rem-6rem)] ${cart.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}
+        >
            <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
               <div className="flex items-center space-x-3 shrink-0">
                  <div className="relative">
                     <div className="bg-slate-900 w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center shadow-lg"><ShoppingBag className="w-5 h-5 text-white" /></div>
                     <span className="absolute -top-2 -right-2 bg-cafeteria-600 text-white w-5 h-5 rounded-full border-2 border-white flex items-center justify-center font-black text-[10px]">{cart.reduce((s, i) => s + i.cantidad, 0)}</span>
                  </div>
-                 <div className="hidden xs:block"><p className="text-xl font-black text-slate-900 tracking-tight">${cartTotal()}</p></div>
+                 <div><p className="text-xl md:text-2xl font-black text-slate-900 tracking-tight leading-none">${cartTotal()}</p></div>
               </div>
 
               <div className="flex items-center space-x-2 flex-1 justify-end">
-                 <button onClick={clearCart} className="text-[10px] font-black text-slate-400 uppercase tracking-tighter px-2">Borrar</button>
+                 <button onClick={clearCart} className="text-[10px] md:text-xs font-black text-slate-300 hover:text-red-500 uppercase tracking-tighter px-2 transition-colors">Vaciar</button>
                  <button
                    onClick={() => setShowRfidModal(true)}
-                   className="flex-1 max-w-xs bg-cafeteria-600 text-white h-12 md:h-14 rounded-xl text-lg md:text-xl font-black shadow-lg shadow-cafeteria-600/20 active:scale-95 flex items-center justify-center uppercase tracking-tighter truncate px-4"
+                   className="flex-1 max-w-xs bg-cafeteria-600 text-white h-12 md:h-14 rounded-xl text-lg md:text-xl font-black shadow-lg shadow-cafeteria-600/20 active:scale-95 flex items-center justify-center uppercase tracking-tighter transition-all hover:bg-cafeteria-700"
                  >
                    Confirmar <ChevronRight className="ml-1 w-5 h-5" />
                  </button>
@@ -173,7 +191,7 @@ export const KioskMenu: React.FC = () => {
         </div>
       </main>
 
-      {/* Modal RFID - Adaptado para Teléfono */}
+      {/* Modal RFID */}
       {showRfidModal && (
         <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[100] flex items-center justify-center p-4">
            <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-sm w-full text-center shadow-2xl relative">
@@ -181,18 +199,18 @@ export const KioskMenu: React.FC = () => {
               {success ? (
                 <div className="animate-in zoom-in-50">
                   <div className="bg-emerald-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-500/30"><CheckCircle className="w-10 h-10 text-white" /></div>
-                  <h2 className="text-3xl font-black text-slate-900 mb-2 italic">¡LISTO!</h2>
-                  <p className="text-slate-400 font-bold">Reserva confirmada.</p>
+                  <h2 className="text-3xl font-black text-slate-900 mb-2 italic tracking-tighter uppercase">¡PEDIDO ENVIADO!</h2>
+                  <p className="text-slate-400 font-bold">Retiralo por el mostrador.</p>
                 </div>
               ) : (
                 <>
-                  <div className="bg-slate-50 w-24 h-24 rounded-2xl flex items-center justify-center mx-auto mb-8 border border-slate-100"><Scan className="w-12 h-12 text-cafeteria-600 animate-pulse" /></div>
-                  <h2 className="text-2xl font-black text-slate-900 mb-2 leading-none">IDENTIFICARSE</h2>
-                  <p className="text-slate-400 font-bold mb-8 text-xs">Apoyá la tarjeta en el lector.</p>
+                  <div className="bg-slate-50 w-24 h-24 rounded-2xl flex items-center justify-center mx-auto mb-8 border border-slate-100 shadow-inner"><Scan className="w-12 h-12 text-cafeteria-600 animate-pulse" /></div>
+                  <h2 className="text-2xl font-black text-slate-900 mb-2 leading-none uppercase italic tracking-tighter">IDENTIFICARSE</h2>
+                  <p className="text-slate-400 font-bold mb-8 text-xs uppercase tracking-widest">Apoyá la tarjeta en el lector.</p>
                   <div className="h-10 flex items-center justify-center">
                     {isSubmitting ? <Loader2 className="animate-spin text-cafeteria-600" /> : 
-                     rfidError ? <div className="text-red-500 text-[10px] font-black uppercase text-center">{rfidError}</div> :
-                     <div className="flex space-x-1"><div className="w-2 h-2 bg-slate-200 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-slate-200 rounded-full animate-bounce delay-100"></div></div>}
+                     rfidError ? <div className="text-red-500 text-[10px] font-black uppercase text-center bg-red-50 px-4 py-2 rounded-lg">{rfidError}</div> :
+                     <div className="flex space-x-1"><div className="w-2 h-2 bg-slate-200 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-slate-200 rounded-full animate-bounce delay-100"></div><div className="w-2 h-2 bg-slate-200 rounded-full animate-bounce delay-200"></div></div>}
                   </div>
                 </>
               )}
