@@ -113,7 +113,7 @@ export const CheckoutPanel: React.FC = () => {
       // 4. Create movement record
       await createMovimiento({
         alumnoId: alumno.id,
-        tipo: 'compra',
+        tipo: 'deuda',
         monto: granTotal,
         descripcion: isFiado ? 'Compra (Fiado)' : 'Compra (Saldo)',
         createdAt: Date.now()

@@ -1,4 +1,4 @@
-import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, orderBy, getDocs } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db } from './config';
 import type { Pedido, EstadoPedido } from '../types';
 
